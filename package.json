@@ -1,0 +1,21 @@
+{
+  "name": "liars-bar",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "node test/sim.mjs",
+    "build": "node build.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "esbuild": "0.24.0",
+    "three": "0.160.0"
+  },
+  "type": "module"
+}

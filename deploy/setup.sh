@@ -10,6 +10,8 @@ set -euo pipefail
 
 REPO="https://github.com/AbdallahFawzyy/far-lu-bo-liars.git"
 DIR="/opt/liars-den"
+# The repo is owned by the liarsden service user; let root run git in it.
+git config --global --add safe.directory "$DIR" 2>/dev/null || true
 PORT=3000
 
 export DEBIAN_FRONTEND=noninteractive

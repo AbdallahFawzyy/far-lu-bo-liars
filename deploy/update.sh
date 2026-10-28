@@ -4,6 +4,8 @@
 set -euo pipefail
 
 DIR="/opt/liars-den"
+# The repo is owned by the liarsden service user; let root run git in it.
+git config --global --add safe.directory "$DIR" 2>/dev/null || true
 cd "$DIR"
 
 git fetch --depth 1 --quiet origin main

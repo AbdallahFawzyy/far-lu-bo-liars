@@ -11,6 +11,7 @@ import * as C from './characters.js';
 import * as W from './world.js';
 import * as T from './textures.js';
 import { getRoom, openTable, randomCode, cleanName } from './net.js';
+import { initHorror } from './horror.js';
 
 const $ = (id) => document.getElementById(id);
 const SPEEDS = { slow: 1.45, normal: 1, fast: 0.6 };
@@ -32,6 +33,7 @@ const app = {
   autoplay: false,
   selected: new Set(),
   quality: 'high',
+  scares: 'on', // off | on | intense
 };
 const S = () => SPEEDS[app.speed] || 1;
 const sleep = (sec) => new Promise((r) => setTimeout(r, sec * 1000 * S() * pres.scale));
@@ -137,6 +139,27 @@ pileG.position.set(0, W.TABLE_Y + 0.003, 0);
 scene.add(pileG);
 const flying = [];
 
+// blood left on the felt where someone fell
+const bloodMat = new THREE.MeshStandardMaterial({ color: '#4a0303', roughness: 0.2, transparent: true, opacity: 0.9, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 });
+const stains = [];
+function bloodAt(pos, dir) {
+  for (let i = 0; i < 26; i++) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.01 + Math.random() * 0.012, 6, 5), bloodMat);
+    m.position.copy(pos);
+    scene.add(m);
+    const v = dir.clone().multiplyScalar(1.2 + Math.random() * 1.6).add(new THREE.Vector3((Math.random() - 0.5) * 0.8, Math.random() * 0.9, (Math.random() - 0.5) * 0.8));
+    puffs.push({ m, v, life: 1.2, blood: true });
+  }
+  const stain = new THREE.Mesh(new THREE.CircleGeometry(0.16 + Math.random() * 0.06, 24), bloodMat);
+  stain.rotation.x = -Math.PI / 2;
+  const onTable = pos.clone().setY(0); onTable.multiplyScalar(Math.min(1, 0.55 / Math.max(0.01, onTable.length())));
+  stain.position.set(onTable.x, W.TABLE_Y + 0.004, onTable.z);
+  stain.scale.setScalar(0.01);
+  scene.add(stain);
+  stains.push(stain);
+}
+function clearStains() { stains.forEach((s) => scene.remove(s)); stains.length = 0; }
+
 // ------------------------------------------------------------------ layout
 
 const layout = { n: 3, phys: [], seatChar: [] };
@@ -201,7 +224,7 @@ const cam = {
 };
 function setFocus(v) { cam.focusTarget.copy(v); }
 function focusSeat(seat) { setFocus(headPos(seat, new THREE.Vector3()).add(new THREE.Vector3(0, -0.15, 0))); }
-function focusTable() { setFocus(new THREE.Vector3(0, W.TABLE_Y, 0)); }
+function focusTable() { setFocus(new THREE.Vector3(0, 1.02, 0)); }
 
 let dragging = null;
 renderer.domElement.addEventListener('pointerdown', (e) => { dragging = { x: e.clientX, y: e.clientY, moved: 0 }; });
@@ -220,7 +243,8 @@ window.addEventListener('pointerup', (e) => {
 
 function updateCamera(dt, t) {
   if (app.debugCam) { camera.position.copy(app.debugCam.pos); camera.lookAt(app.debugCam.look); return; }
-  cam.focus.lerp(cam.focusTarget, 1 - Math.exp(-3 * dt));
+  const target = cam.glance ? cam.focusTarget.clone().lerp(cam.glance, 0.5) : cam.focusTarget;
+  cam.focus.lerp(target, 1 - Math.exp(-(cam.glance ? 1.5 : 3) * dt));
   if (app.mode !== 'game') {
     cam.menuT += dt * 0.08;
     const r = 2.6;
@@ -266,8 +290,10 @@ function layoutHand(dt = 1) {
     const vis = show && i < n;
     c.visible = vis;
     if (!vis) return;
-    c.userData.face.material.map = faceTex[hand[i]];
-    c.userData.face.material.emissiveMap = faceTex[hand[i]];
+    if (!c.userData.cursed) {
+      c.userData.face.material.map = faceTex[hand[i]];
+      c.userData.face.material.emissiveMap = faceTex[hand[i]];
+    }
     const spread = narrow ? 0.07 : 0.095;
     const x = (i - (n - 1) / 2) * spread;
     const sel = app.selected.has(i);
@@ -466,6 +492,8 @@ function present(g) {
     pres.lastId = g.evId; pres.queue = []; pres.counts = {}; pres.shots = {}; pres.alive = {};
     cam.spectate = app.mySeat < 0 || !g.seats[app.mySeat].alive;
     applyLayout(g);
+    clearStains();
+    horror.reset();
     $('tableCard').hidden = false;
     setTableCard(g.table);
     pileG.clear();
@@ -736,6 +764,11 @@ async function handle(ev) {
 }
 
 async function roulette(ev) {
+  pres.inRoulette = true;
+  try { await rouletteInner(ev); } finally { pres.inRoulette = false; }
+}
+
+async function rouletteInner(ev) {
   const g = app.g;
   const s = g.seats[ev.s];
   const ch = chars[s.char];
@@ -758,13 +791,11 @@ async function roulette(ev) {
   if (me) {
     pres.hideHand = true;
     fpGun.visible = true;
-    fpGun.position.set(0.32, -0.32, -0.5);
-    fpGun.rotation.set(0, 0, 0);
+    fpGun.position.copy(FP_START);
+    fpGun.quaternion.copy(FP_Q);
     gn.obj.visible = false;
-    const tgt = { p: new THREE.Vector3(0.13, 0.0, -0.2), r: new THREE.Euler(0.15, -2.6, 0.2) };
     await tween(0.9, (k) => {
-      fpGun.position.lerpVectors(new THREE.Vector3(0.32, -0.32, -0.5), tgt.p, k);
-      fpGun.rotation.set(tgt.r.x * k, tgt.r.y * k, tgt.r.z * k);
+      fpGun.position.lerpVectors(FP_START, FP_POS, k);
       cam.roll = -0.08 * k;
     });
     grade.uniforms.red.value = 0.5;
@@ -810,6 +841,9 @@ async function roulette(ev) {
       grade.uniforms.desat.value = 0.55;
       $('flash').className = '';
     } else {
+      const hp = headPos(ev.s, new THREE.Vector3());
+      const away = new THREE.Vector3(1, 0, 0).applyQuaternion(ch.root.quaternion);
+      bloodAt(hp.addScaledVector(away, C.CHARACTERS[s.char].headR), away);
       C.kill(ch, scene);
       A.sfx.wigFlap(pan, 0.1);
       A.sfx.thud(pan, 0.5, 0.8);
@@ -831,7 +865,7 @@ async function roulette(ev) {
     ch.shake = 0; ch.sweat = 0.3;
     if (me) {
       grade.uniforms.red.value = 0;
-      await tween(0.6, (k) => { fpGun.position.lerp(new THREE.Vector3(0.32, -0.4, -0.5), k); cam.roll = -0.08 * (1 - k); });
+      await tween(0.6, (k) => { fpGun.position.lerpVectors(FP_POS, FP_START, k); cam.roll = -0.08 * (1 - k); });
       fpGun.visible = false;
       gn.obj.visible = true;
       say(ev.s, 'survive', ev.id);
@@ -891,50 +925,108 @@ function puff(at) {
   }
 }
 
-const _hp = new THREE.Vector3(), _tp = new THREE.Vector3(), _m4 = new THREE.Matrix4();
+const _tp = new THREE.Vector3(), _m4 = new THREE.Matrix4();
+const MUZZLE = 0.23 * W.GUN_SCALE, MUZZLE_UP = 0.04 * W.GUN_SCALE;
+const GRIP = new THREE.Vector3(-0.085, -0.05, 0).multiplyScalar(W.GUN_SCALE);
+
+/** Orientation whose +x is `dir` and whose +y leans toward `upHint`. */
+function gunQuat(dir, upHint) {
+  const x = dir.clone().normalize();
+  const y = upHint.clone().addScaledVector(x, -upHint.dot(x)).normalize();
+  const z = new THREE.Vector3().crossVectors(x, y);
+  _m4.makeBasis(x, y, z);
+  return new THREE.Quaternion().setFromRotationMatrix(_m4);
+}
+
+/** Where the gun sits when pressed to this character's right temple, angled up into it. */
+function templePose(ch) {
+  const c = C.CHARACTERS[ch.char];
+  const hq = new THREE.Quaternion(); ch.head.getWorldQuaternion(hq);
+  ch.head.getWorldPosition(_tp);
+  const right = new THREE.Vector3(-1, 0, 0).applyQuaternion(hq);
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(hq);
+  const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(hq);
+  const Rw = c.headR * c.headScale[0];
+  // just outside the hair at the temple
+  const temple = _tp.clone().addScaledVector(right, Rw * 1.14).addScaledVector(up, Rw * 0.12).addScaledVector(fwd, Rw * 0.05);
+  const dir = right.clone().multiplyScalar(-0.93).addScaledVector(up, 0.26).addScaledVector(fwd, 0.1).normalize();
+  const q = gunQuat(dir, up.clone().addScaledVector(right, 0.4));
+  const y = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
+  const pos = temple.clone().addScaledVector(dir, -MUZZLE).addScaledVector(y, -MUZZLE_UP);
+  return { pos, q, right };
+}
+
+/** Two-bone IK: put the right hand on the gun's grip. */
+const _S = new THREE.Vector3(), _pq = new THREE.Quaternion();
+function aimBone(bone, from, to) {
+  const d = to.clone().sub(from).normalize();
+  const wq = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), d);
+  bone.parent.getWorldQuaternion(_pq);
+  bone.quaternion.copy(_pq.invert().multiply(wq));
+  bone.updateMatrixWorld(true);
+}
+function reachGrip(ch, gunObj, right) {
+  const arm = ch.arms.R;
+  const target = gunObj.localToWorld(GRIP.clone().divideScalar(W.GUN_SCALE));
+  arm.sh.getWorldPosition(_S);
+  const a = 0.29, b = 0.33;
+  const toT = target.clone().sub(_S);
+  const d = Math.min(Math.max(toT.length(), 0.08), a + b - 0.002);
+  const dirT = toT.normalize();
+  const along = (a * a - b * b + d * d) / (2 * d);
+  const h = Math.sqrt(Math.max(0, a * a - along * along));
+  const pole = right.clone().multiplyScalar(0.5).add(new THREE.Vector3(0, -1, 0));
+  pole.addScaledVector(dirT, -pole.dot(dirT)).normalize();
+  const elbow = _S.clone().addScaledVector(dirT, along).addScaledVector(pole, h);
+  const wrist = _S.clone().addScaledVector(dirT, d);
+  aimBone(arm.sh, _S, elbow);
+  aimBone(arm.el, elbow, wrist);
+  const gq = new THREE.Quaternion(); gunObj.getWorldQuaternion(gq);
+  arm.wr.parent.getWorldQuaternion(_pq);
+  arm.wr.quaternion.copy(_pq.invert().multiply(gq));
+}
+
 function updateGuns(dt) {
   guns.forEach((gn, i) => {
     if (!gn.obj.visible || gn.mode === 'rest') return;
     const ch = charOf(i);
     if (!ch) return;
     gn.t += dt / S();
-    // temple point on the character's right side
-    ch.head.getWorldPosition(_tp);
-    const right = new THREE.Vector3(-1, 0, 0).applyQuaternion(ch.root.quaternion);
-    const R = C.CHARACTERS[ch.char].headR;
-    const temple = _tp.clone().addScaledVector(right, R * 1.05).add(new THREE.Vector3(0, R * 0.1, 0));
-    ch.arms.R.hand.getWorldPosition(_hp);
-    const out = _hp.clone().sub(temple);
-    if (out.lengthSq() < 1e-4) out.copy(right);
-    out.normalize();
-    const pos = temple.clone().addScaledVector(out, 0.28);
-    const dir = temple.clone().sub(pos).normalize();
-    const up = new THREE.Vector3(0, 1, 0);
-    const z = new THREE.Vector3().crossVectors(dir, up).normalize();
-    const y = new THREE.Vector3().crossVectors(z, dir).normalize();
-    _m4.makeBasis(dir, y, z);
-    const q = new THREE.Quaternion().setFromRotationMatrix(_m4);
+    const { pos, q, right } = templePose(ch);
+    const restQ = new THREE.Quaternion().setFromEuler(gn.rest.rotation);
+    let hold = true;
     if (gn.mode === 'lift') {
       const k = Math.min(1, gn.t / 0.9);
-      gn.obj.position.lerpVectors(gn.rest.position, pos, k * k * (3 - 2 * k));
-      gn.obj.quaternion.slerpQuaternions(new THREE.Quaternion().setFromEuler(gn.rest.rotation), q, k);
+      const e = k * k * (3 - 2 * k);
+      gn.obj.position.lerpVectors(gn.rest.position, pos, e);
+      gn.obj.quaternion.slerpQuaternions(restQ, q, e);
     } else if (gn.mode === 'head') {
-      gn.obj.position.copy(pos).add(new THREE.Vector3((Math.random() - 0.5) * 0.003 * ch.shake, 0, 0));
+      gn.obj.position.copy(pos).add(new THREE.Vector3((Math.random() - 0.5) * 0.004 * ch.shake, (Math.random() - 0.5) * 0.004 * ch.shake, 0));
       gn.obj.quaternion.copy(q);
     } else if (gn.mode === 'return') {
       const k = Math.min(1, gn.t / 0.8);
       gn.obj.position.lerp(gn.rest.position, k);
-      gn.obj.quaternion.slerp(new THREE.Quaternion().setFromEuler(gn.rest.rotation), k);
+      gn.obj.quaternion.slerp(restQ, k);
+      hold = k < 0.85;
       if (k >= 1) { gn.mode = 'rest'; gn.obj.userData.hammer.rotation.z = 0; }
     } else if (gn.mode === 'drop') {
+      hold = false;
       const k = Math.min(1, gn.t / 0.6);
       const tgt = gn.rest.position.clone().add(new THREE.Vector3(0.05, 0, 0.05));
       gn.obj.position.lerp(tgt, k);
       gn.obj.quaternion.slerp(new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, gn.rest.rotation.z + 2)), k);
       if (k >= 1) gn.mode = 'rest';
     }
+    if (hold && !ch.dead) { gn.obj.updateMatrixWorld(true); reachGrip(ch, gn.obj, right); }
   });
 }
+
+/** First person: the gun sits low-right in view, muzzle against your right temple. */
+const FP_TEMPLE = new THREE.Vector3(0.1, 0.02, 0.03);
+const FP_DIR = new THREE.Vector3(-0.42, 0.45, 0.52).normalize();
+const FP_Q = gunQuat(FP_DIR, new THREE.Vector3(0.6, 1, 0));
+const FP_POS = FP_TEMPLE.clone().addScaledVector(FP_DIR, -MUZZLE).addScaledVector(new THREE.Vector3(0, 1, 0).applyQuaternion(FP_Q), -MUZZLE_UP);
+const FP_START = new THREE.Vector3(0.35, -0.5, -0.55);
 
 // ------------------------------------------------------------------ host director
 
@@ -1323,6 +1415,10 @@ document.querySelectorAll('[name="speed"]').forEach((r) => r.addEventListener('c
   if (host.g) host.g.speed = app.speed;
   if (app.mode === 'lobby' && app.isHost && app.table) renderLobbyHost();
 }));
+document.querySelectorAll('[name="scares"]').forEach((r) => r.addEventListener('change', (e) => {
+  app.scares = e.target.value;
+  try { localStorage.setItem('ld-scares', app.scares); } catch { /* storage blocked */ }
+}));
 $('btnSound').addEventListener('click', () => {
   A.initAudio();
   A.setSound(!A.soundOn());
@@ -1370,6 +1466,25 @@ function menuScene() {
   app.g = prev === undefined ? null : null;
 }
 
+// ------------------------------------------------------------------ horror
+
+const horror = initHorror({
+  scene, camera, world, handCards, grade,
+  others: () => (app.g ? app.g.seats.map((s, i) => i).filter((i) => i !== app.mySeat && app.g.seats[i].alive && physIndex(i) !== 0) : []),
+  seatHead: (i) => headPos(i, new THREE.Vector3()),
+  charOf,
+  panOf,
+  panAt: (v) => { const p = v.clone().applyMatrix4(camera.matrixWorldInverse); return Math.max(-1, Math.min(1, p.x / 2)); },
+  heads: () => (app.g ? app.g.seats.map((s, i) => i).filter((i) => i !== app.mySeat || cam.spectate).map((i) => headPos(i, new THREE.Vector3())) : []),
+  talk: (ch, sec) => C.talk(ch, sec),
+  shake: (v) => { cam.shake = Math.max(cam.shake, v); },
+  glance: (v) => { cam.glance = v ? v.clone() : null; },
+  spectating: () => cam.spectate || app.mySeat < 0,
+  busy: () => pres.inRoulette || fpGun.visible,
+  mode: () => app.mode,
+  level: () => app.scares,
+});
+
 // ------------------------------------------------------------------ loop
 
 const clock = new THREE.Clock();
@@ -1381,12 +1496,16 @@ function frame() {
   hostStep(now);
   for (const id of CHAR_ORDER) if (chars[id].root.visible || chars[id].dead) C.updateCharacter(chars[id], dt);
   W.updateWorld(world, dt, t);
+  horror.update(dt);
+  for (const id of CHAR_ORDER) if (chars[id].possessed) C.lookAt(chars[id], camera.getWorldPosition(new THREE.Vector3()));
+  for (const st of stains) if (st.scale.x < 1) st.scale.setScalar(Math.min(1, st.scale.x + dt * 0.5));
   updateGuns(dt);
   updateFlying(dt);
   for (let i = puffs.length - 1; i >= 0; i--) {
     const p = puffs[i];
     p.life -= dt;
     p.m.position.addScaledVector(p.v, dt);
+    if (p.blood) { p.v.y -= 9.8 * dt; if (p.m.position.y < W.TABLE_Y) { p.m.position.y = W.TABLE_Y; p.v.set(0, 0, 0); } p.life -= dt * 0.2; if (p.life <= 0) { scene.remove(p.m); puffs.splice(i, 1); } continue; }
     p.v.multiplyScalar(0.96);
     p.m.scale.setScalar(1 + (1.6 - p.life) * 2);
     p.m.material.opacity = Math.max(0, p.life / 1.6) * 0.4;
@@ -1423,6 +1542,8 @@ function boot() {
   try {
     const n = localStorage.getItem('ld-name'); if (n) $('nameInput').value = n;
     const c = localStorage.getItem('ld-char'); if (CHAR_ORDER.includes(c)) app.myChar = c;
+    const sc = localStorage.getItem('ld-scares');
+    if (['off', 'on', 'intense'].includes(sc)) { app.scares = sc; document.querySelectorAll('[name="scares"]').forEach((r) => { r.checked = r.value === sc; }); }
   } catch { /* storage blocked */ }
   renderPortraits();
   buildCharPicker();
@@ -1437,5 +1558,5 @@ function boot() {
   $('loading').hidden = true;
 }
 
-window.__ld = { portraits, THREE, app, host, pres, chars, scene, camera, setAutoplay: (v) => { app.autoplay = v; }, G };
+window.__ld = { guns, C, horror, portraits, THREE, app, host, pres, chars, scene, camera, setAutoplay: (v) => { app.autoplay = v; }, G };
 boot();

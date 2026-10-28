@@ -727,11 +727,12 @@ export function updateCharacter(ch, dt) {
   // blinking
   ch.nextBlink -= dt;
   if (ch.nextBlink < 0) { ch.blink = 1; ch.nextBlink = 1.5 + Math.random() * 4; }
-  ch.blink = damp(ch.blink, 0, 18, dt);
+  ch.blink = ch.possessed ? 0 : damp(ch.blink, 0, 18, dt);
   const lid = Math.min(1, Math.max(-0.3, e.lid + (ch.dead ? 0 : ch.blink)));
   for (const eye of ch.eyes) {
     eye.lidPiv.rotation.x = -2.5 * (1 - Math.pow(Math.max(0, Math.min(1, (lid + 0.3) / 1.3)), 2.2));
-    eye.pupil.scale.setScalar(e.pupil);
+    eye.pupil.scale.setScalar(ch.possessed ? 3.6 : e.pupil);
+    eye.iris.scale.setScalar(ch.possessed ? 1.7 : 1);
     eye.browPiv.position.y = ch.head.children[0].geometry.parameters.radius * (0.42 + e.brow * 0.18);
     eye.browPiv.rotation.z = eye.s * -e.browAng * -1;
     // eyes track the look target (with nervous darting while shaking)

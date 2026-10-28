@@ -19,6 +19,8 @@ function mesh(geo, mat, cast = true, recv = true) {
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 export const TABLE_Y = 0.78;
+/** The revolvers are oversized to match the characters' big heads. */
+export const GUN_SCALE = 1.7;
 export const TABLE_R = 0.95;
 export const SEAT_R = 1.32;
 
@@ -185,8 +187,19 @@ export function buildWorld(scene) {
   const dart = mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.04, 24), std('#2a1a10'));
   dart.rotation.x = Math.PI / 2; dart.position.set(-1.6, 1.7, 3.97); scene.add(dart);
   // door with light leaking under it
+  // the door swings on a hinge at its left edge; behind it is a black stairwell
+  const doorPivot = new THREE.Group();
+  doorPivot.position.set(2.1, 0, -3.92);
   const door = mesh(new THREE.BoxGeometry(1, 2.1, 0.08), std('#ffffff', { map: T.wood('#2a1a10', '#120a05', [1, 2]) }));
-  door.position.set(2.6, 1.05, -3.96); scene.add(door);
+  door.position.set(0.5, 1.05, 0);
+  const knob = mesh(new THREE.SphereGeometry(0.035, 10, 8), std('#8a7a5a', { metalness: 1, roughness: 0.35 }));
+  knob.position.set(0.88, 1.0, 0.06);
+  doorPivot.add(door, knob);
+  scene.add(doorPivot);
+  W.door = doorPivot;
+  const hole = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 2.1), new THREE.MeshBasicMaterial({ color: '#010102' }));
+  hole.position.set(2.6, 1.05, -3.985);
+  scene.add(hole);
   const leak = mesh(new THREE.PlaneGeometry(1, 0.02), new THREE.MeshBasicMaterial({ color: '#ffd8a0' }), false, false);
   leak.position.set(2.6, 0.01, -3.9); leak.rotation.x = -Math.PI / 2; scene.add(leak);
   const doorLight = new THREE.PointLight('#5a7aa8', 1.2, 4, 2);
@@ -203,7 +216,8 @@ export function buildWorld(scene) {
   W.fan = fan;
 
   // ---------------- lighting
-  scene.add(new THREE.HemisphereLight('#6a5040', '#1a1008', 1.1));
+  const hemi = new THREE.HemisphereLight('#6a5040', '#1a1008', 1.1);
+  scene.add(hemi);
   const bounce = new THREE.PointLight('#ffb878', 2.2, 3.2, 1.5);
   bounce.position.set(0, 1.05, 0);
   scene.add(bounce);
@@ -239,6 +253,7 @@ export function buildWorld(scene) {
   const barGlow = new THREE.PointLight('#ffb060', 3, 4, 2);
   barGlow.position.set(-1.2, 2.2, -3.4); scene.add(barGlow);
   W.flicker.push({ light: barGlow, base: 3, kind: 'bulb' });
+  W.lights.steady = [hemi, bounce, fill, doorLight].map((l) => ({ light: l, base: l.intensity }));
   W.lights.flash = new THREE.PointLight('#ffd8a0', 0, 5, 2);
   scene.add(W.lights.flash);
 
@@ -380,7 +395,7 @@ export function buildRevolver() {
   grip.position.z = -0.013;
   g.add(grip);
   g.traverse((o) => { if (o.isMesh) { o.castShadow = true; } });
-  g.scale.setScalar(S * 1.35);
+  g.scale.setScalar(S * GUN_SCALE);
   g.userData = { cyl, hammer, trigger, muzzle: new THREE.Vector3(0.23, 0.04, 0) };
   return g;
 }

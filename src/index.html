@@ -169,7 +169,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); out
   <div class="menuBox">
     <header>
       <h1 class="title">Liar's <em>Den</em></h1>
-      <p class="tag">A cellar bar, one deck, one revolver each. Claim the table card, lie when you must, and call out anyone you don't believe. Whoever's wrong pulls the trigger.</p>
+      <p class="tag">A cellar under the black market. One deck, one revolver each, and something else down here with you. Claim the table card, lie when you must, call out anyone you don't believe. Whoever's wrong pulls the trigger.</p>
     </header>
     <div class="panel" id="menuChars">
       <p class="label">Pick your character</p>
@@ -193,6 +193,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); out
             <label><input type="radio" name="speed" value="slow"><span>Slow</span></label>
             <label><input type="radio" name="speed" value="normal" checked><span>Normal</span></label>
             <label><input type="radio" name="speed" value="fast"><span>Fast</span></label>
+          </div>
+          <div class="seg" role="radiogroup" aria-label="Scares">
+            <label><input type="radio" name="scares" value="off"><span>No scares</span></label>
+            <label><input type="radio" name="scares" value="on" checked><span>Scares</span></label>
+            <label><input type="radio" name="scares" value="intense"><span>Intense</span></label>
           </div>
         </div>
         <button class="btn primary" id="btnSolo" type="button">Sit down</button>

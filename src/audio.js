@@ -3,6 +3,7 @@
 let ctx = null;
 let master, sfxBus, musicBus, ambBus, verb, verbSend;
 let enabled = true;
+const MUSIC_LEVEL = 0.34;
 const listeners = [];
 
 function impulse(seconds, decay) {
@@ -38,10 +39,11 @@ export function initAudio() {
   verbSend = ctx.createGain(); verbSend.gain.value = 1; verbSend.connect(verb);
   sfxBus = ctx.createGain(); sfxBus.gain.value = 1; sfxBus.connect(master);
   const sfxVerb = ctx.createGain(); sfxVerb.gain.value = 0.35; sfxBus.connect(sfxVerb).connect(verbSend);
-  musicBus = ctx.createGain(); musicBus.gain.value = 0.22;
-  const radio = ctx.createBiquadFilter(); radio.type = 'bandpass'; radio.frequency.value = 1200; radio.Q.value = 0.5;
-  musicBus.connect(radio).connect(master);
-  radio.connect(verbSend);
+  musicBus = ctx.createGain(); musicBus.gain.value = MUSIC_LEVEL;
+  const warm = ctx.createBiquadFilter(); warm.type = 'lowpass'; warm.frequency.value = 3800;
+  musicBus.connect(warm).connect(master);
+  const musicVerb = ctx.createGain(); musicVerb.gain.value = 0.9;
+  warm.connect(musicVerb).connect(verbSend);
   ambBus = ctx.createGain(); ambBus.gain.value = 0.5; ambBus.connect(master);
   const nb = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
   const d = nb.getChannelData(0);
@@ -158,6 +160,88 @@ export const sfx = {
   ui() { tone({ type: 'triangle', freq: 880, to: 660, dur: 0.06, gain: 0.08 }); },
   select(up = true) { tone({ type: 'triangle', freq: up ? 700 : 500, to: up ? 900 : 400, dur: 0.05, gain: 0.08 }); burst({ type: 'highpass', freq: 3000, dur: 0.03, gain: 0.08 }); },
   squeak(pan = 0) { tone({ type: 'sine', freq: 2800, to: 3600, dur: 0.08, gain: 0.04, pan }); tone({ t: 0.1, type: 'sine', freq: 3200, to: 2600, dur: 0.06, gain: 0.03, pan }); },
+  /** Breathy whisper: formant-filtered noise that drifts. */
+  whisper(pan = 0, dur = 2.2, t = 0) {
+    if (!ctx) return;
+    const now = ctx.currentTime + t;
+    const src = noise();
+    const g = ctx.createGain(); g.gain.value = 0;
+    const out = spatial(sfxBus, pan, 0.9);
+    [[700, 9], [1300, 8], [2600, 7]].forEach(([f, q]) => {
+      const b = ctx.createBiquadFilter(); b.type = 'bandpass'; b.frequency.value = f; b.Q.value = q;
+      for (let k = 0; k < 8; k++) b.frequency.setValueAtTime(f * (0.7 + Math.random() * 0.7), now + (k * dur) / 8);
+      src.connect(b).connect(g);
+    });
+    g.connect(out);
+    for (let k = 0; k < Math.ceil(dur * 4); k++) {
+      const at = now + k * 0.25;
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.linearRampToValueAtTime(0.5 + Math.random() * 0.6, at + 0.06);
+      g.gain.linearRampToValueAtTime(0.0001, at + 0.22);
+    }
+    src.start(now); src.stop(now + dur + 0.3);
+  },
+  breath(pan = 0, t = 0, n = 3) {
+    for (let i = 0; i < n; i++) {
+      burst({ t: t + i * 1.4, type: 'bandpass', freq: 900, sweep: 500, q: 1.5, dur: 0.7, gain: 0.35, pan, attack: 0.4 });
+      burst({ t: t + i * 1.4 + 0.8, type: 'bandpass', freq: 600, sweep: 400, q: 1.5, dur: 0.5, gain: 0.25, pan, attack: 0.2 });
+    }
+  },
+  creak(pan = 0, t = 0, dur = 2.5) {
+    if (!ctx) return;
+    const now = ctx.currentTime + t;
+    const o = ctx.createOscillator(); o.type = 'sawtooth';
+    o.frequency.setValueAtTime(90, now);
+    o.frequency.linearRampToValueAtTime(140, now + dur * 0.4);
+    o.frequency.linearRampToValueAtTime(70, now + dur);
+    const trem = ctx.createOscillator(); trem.frequency.value = 23;
+    const tg = ctx.createGain(); tg.gain.value = 0.5;
+    const g = ctx.createGain(); g.gain.value = 0.5;
+    trem.connect(tg).connect(g.gain);
+    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1100; f.Q.value = 6;
+    const env2 = ctx.createGain();
+    o.connect(f).connect(g).connect(env2).connect(spatial(sfxBus, pan, 0.5));
+    env2.gain.setValueAtTime(0.0001, now);
+    env2.gain.linearRampToValueAtTime(1, now + 0.3);
+    env2.gain.linearRampToValueAtTime(0.0001, now + dur);
+    o.start(now); trem.start(now); o.stop(now + dur + 0.1); trem.stop(now + dur + 0.1);
+  },
+  slam(pan = 0, t = 0) { tone({ t, freq: 90, to: 30, dur: 0.6, gain: 1.4, pan, attack: 0.001 }); burst({ t, type: 'lowpass', freq: 1800, sweep: 200, dur: 0.5, gain: 1.2, pan, attack: 0.001 }); },
+  footsteps(pan = 0, t = 0, n = 5, gap = 0.7) { for (let i = 0; i < n; i++) { this.thud(pan, t + i * gap, 0.25); burst({ t: t + i * gap, type: 'bandpass', freq: 300, dur: 0.08, gain: 0.3, pan }); } },
+  /** Low brass-like hit for a scare. */
+  stinger(t = 0) {
+    [36.7, 38.9, 55, 73.4].forEach((f) => tone({ t, type: 'sawtooth', freq: f, to: f * 0.94, dur: 2.4, gain: 0.16, attack: 0.01 }));
+    burst({ t, type: 'lowpass', freq: 500, sweep: 60, dur: 1.5, gain: 1.0, attack: 0.002 });
+  },
+  /** Jump-scare screech: dissonant shrieking cluster plus noise. */
+  screech(t = 0) {
+    [1180, 1250, 1663, 2210, 2350].forEach((f) => tone({ t, type: 'sawtooth', freq: f, to: f * 1.15, dur: 1.1, gain: 0.07, attack: 0.005 }));
+    burst({ t, type: 'highpass', freq: 1500, dur: 1.0, gain: 0.9, attack: 0.002 });
+    this.stinger(t);
+  },
+  boom(t = 0) { tone({ t, freq: 48, to: 22, dur: 2.2, gain: 1.2, attack: 0.005 }); },
+  glitch(t = 0) { for (let i = 0; i < 10; i++) burst({ t: t + i * 0.035, type: 'bandpass', freq: 400 + Math.random() * 5000, q: 3, dur: 0.03, gain: 0.5 }); },
+  staticNoise(dur = 2, t = 0) { burst({ t, type: 'bandpass', freq: 2500, q: 0.4, dur, gain: 0.4, attack: 0.05 }); },
+  bloodDrip(pan = 0, t = 0) { tone({ t, freq: 320, to: 180, dur: 0.12, gain: 0.12, pan }); burst({ t, type: 'lowpass', freq: 700, dur: 0.06, gain: 0.2, pan }); },
+  /** Slow, deep, wrong voice from somewhere in the room. */
+  demonVoice(pan = 0, t = 0, syll = 6) {
+    if (!ctx) return;
+    const now = ctx.currentTime + t;
+    for (let i = 0; i < syll; i++) {
+      const at = now + i * 0.32;
+      const o = ctx.createOscillator(); o.type = 'sawtooth';
+      o.frequency.setValueAtTime(52 + Math.random() * 10, at);
+      o.frequency.linearRampToValueAtTime(40, at + 0.3);
+      const [f1, f2] = VOWELS[Math.floor(Math.random() * VOWELS.length)];
+      const a = ctx.createBiquadFilter(); a.type = 'bandpass'; a.frequency.value = f1 * 0.7; a.Q.value = 5;
+      const b = ctx.createBiquadFilter(); b.type = 'bandpass'; b.frequency.value = f2 * 0.6; b.Q.value = 6;
+      const g = ctx.createGain();
+      o.connect(a).connect(g); o.connect(b).connect(g);
+      g.connect(spatial(sfxBus, pan, 1.6));
+      g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(1, at + 0.05); g.gain.exponentialRampToValueAtTime(0.0001, at + 0.31);
+      o.start(at); o.stop(at + 0.33);
+    }
+  },
   wigFlap(pan = 0, t = 0) { burst({ t, type: 'bandpass', freq: 700, sweep: 2500, q: 0.6, dur: 0.3, gain: 0.25, pan }); },
 };
 
@@ -218,35 +302,98 @@ function startAmbience() {
   const lfo = ctx.createOscillator(); lfo.frequency.value = 0.13; const lg = ctx.createGain(); lg.gain.value = 0.06;
   lfo.connect(lg).connect(cg.gain); lfo.start();
   c.connect(cf).connect(cg).connect(ambBus); c.start();
-  // dripping pipe
-  const drip = () => {
-    if (!ctx) return;
-    tone({ freq: 1400 + Math.random() * 600, to: 2400, dur: 0.06, gain: 0.025, pan: -0.6, bus: ambBus });
-    setTimeout(drip, 2500 + Math.random() * 6000);
-  };
-  setTimeout(drip, 3000);
 }
 
-// A slow, smoky minor blues from a radio behind the bar.
+// "Black market tragedy": a slow D-minor waltz on a detuned piano over a bowed
+// string pad and a low drone, with a funeral bell every few bars.
+const midi = (m) => 440 * Math.pow(2, (m - 69) / 12);
+
+function piano(t, m, gain = 0.16, detune = 0) {
+  const f = midi(m) * Math.pow(2, detune / 1200);
+  const now = ctx.currentTime + t;
+  const out = ctx.createGain(); out.connect(musicBus);
+  out.gain.setValueAtTime(0.0001, now);
+  out.gain.exponentialRampToValueAtTime(gain, now + 0.008);
+  out.gain.exponentialRampToValueAtTime(gain * 0.35, now + 0.4);
+  out.gain.exponentialRampToValueAtTime(0.0001, now + 3.6);
+  [[1, 1], [2, 0.35], [3, 0.12], [4.02, 0.05]].forEach(([h, a]) => {
+    const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f * h;
+    const g = ctx.createGain(); g.gain.value = a;
+    o.connect(g).connect(out); o.start(now); o.stop(now + 3.7);
+  });
+}
+
+function strings(t, notes, dur, gain = 0.035) {
+  const now = ctx.currentTime + t;
+  const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 700; f.Q.value = 0.7;
+  const g = ctx.createGain(); g.connect(musicBus);
+  f.connect(g);
+  g.gain.setValueAtTime(0.0001, now);
+  g.gain.linearRampToValueAtTime(gain, now + dur * 0.35);
+  g.gain.linearRampToValueAtTime(gain * 0.8, now + dur * 0.8);
+  g.gain.linearRampToValueAtTime(0.0001, now + dur + 1.2);
+  for (const m of notes) for (const d of [-7, 6]) {
+    const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = midi(m); o.detune.value = d;
+    const vib = ctx.createOscillator(); vib.frequency.value = 4.6 + Math.random();
+    const vg = ctx.createGain(); vg.gain.value = 3; vib.connect(vg).connect(o.detune);
+    o.connect(f); o.start(now); vib.start(now); o.stop(now + dur + 1.3); vib.stop(now + dur + 1.3);
+  }
+}
+
+function bell(t, m, gain = 0.09) {
+  const now = ctx.currentTime + t;
+  const f = midi(m);
+  [[1, 1, 7], [2.76, 0.5, 4], [5.4, 0.25, 2.5], [8.93, 0.12, 1.5]].forEach(([h, a, d]) => {
+    const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f * h;
+    const g = ctx.createGain(); g.connect(musicBus);
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(gain * a, now + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + d);
+    o.connect(g); o.start(now); o.stop(now + d + 0.1);
+  });
+}
+
 function startMusic() {
-  const bpm = 72, beat = 60 / bpm;
-  const prog = [[110, 130.8, 164.8], [146.8, 174.6, 220], [110, 130.8, 164.8], [164.8, 207.7, 246.9]];
-  const bass = [55, 65.4, 73.4, 82.4, 73.4, 65.4, 61.7, 58.3];
+  // drone: low D, two detuned saws through a slowly breathing filter
+  const df = ctx.createBiquadFilter(); df.type = 'lowpass'; df.frequency.value = 160; df.Q.value = 2;
+  const dg = ctx.createGain(); dg.gain.value = 0.09; df.connect(dg).connect(musicBus);
+  for (const [fr, det] of [[36.71, -8], [36.71, 9], [55, 0]]) {
+    const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = fr; o.detune.value = det;
+    o.connect(df); o.start();
+  }
+  const lfo = ctx.createOscillator(); lfo.frequency.value = 0.05;
+  const lg = ctx.createGain(); lg.gain.value = 90; lfo.connect(lg).connect(df.frequency); lfo.start();
+
+  const beat = 60 / 54; // slow waltz, 3 beats a bar
+  const chords = [[50, 53, 57], [46, 50, 53], [43, 50, 55], [45, 49, 52], [50, 53, 57], [48, 53, 57], [43, 46, 50], [45, 49, 55]];
+  const melody = [
+    [69, 65, 62], [70, 69, 67], [67, 70, 74], [73, null, 69],
+    [74, 72, 70], [69, 65, 69], [67, 70, 69], [69, null, null],
+  ];
+  const answer = [
+    [null, 62, 65], [67, null, 65], [62, 58, 62], [61, null, null],
+    [null, 69, 70], [72, 70, 69], [67, 65, 64], [62, null, null],
+  ];
   let bar = 0;
-  let next = ctx.currentTime + 0.5;
+  let next = ctx.currentTime + 0.8;
   const schedule = () => {
     if (!ctx) return;
-    while (next < ctx.currentTime + 2) {
-      const chord = prog[bar % 4];
-      for (let b = 0; b < 4; b++) {
-        const t = next + b * beat - ctx.currentTime;
-        tone({ t, type: 'triangle', freq: bass[(bar * 4 + b) % 8] * (bar % 4 === 1 ? 1.335 : 1), dur: beat * 0.9, gain: 0.5, bus: musicBus });
-        burst({ t: t + beat / 2, type: 'highpass', freq: 7000, dur: 0.05, gain: 0.08 * 2.5 });
-        if (b === 0 || b === 2) chord.forEach((f) => tone({ t: t + 0.02, type: 'sine', freq: f * 2, dur: beat * 1.6, gain: 0.13, attack: 0.04, bus: musicBus }));
-      }
-      next += beat * 4; bar += 1;
+    while (next < ctx.currentTime + 3) {
+      const i = bar % 8;
+      const cycle = Math.floor(bar / 8) % 4;
+      const t0 = next - ctx.currentTime;
+      strings(t0, chords[i], beat * 3, 0.03);
+      piano(t0, chords[i][0] - 12, 0.12); // left hand bass
+      piano(t0 + beat, chords[i][1], 0.05);
+      piano(t0 + beat * 2, chords[i][2], 0.05);
+      const line = cycle === 1 ? answer : melody;
+      if (cycle !== 3) line[i].forEach((m, k) => { if (m) piano(t0 + k * beat, m, 0.14, cycle === 2 ? -18 : 0); });
+      else if (i % 2 === 0) piano(t0, melody[i][0] + 12, 0.06, -25); // sparse, out-of-tune music box
+      if (i === 0) bell(t0, 38, 0.1);
+      if (i === 4 && Math.random() < 0.5) bell(t0 + beat, 37, 0.06); // a flat, wrong second toll
+      next += beat * 3; bar += 1;
     }
-    setTimeout(schedule, 500);
+    setTimeout(schedule, 700);
   };
   schedule();
 }
@@ -257,6 +404,6 @@ export function duckMusic(amount = 0.05, time = 0.4) {
 }
 export function restoreMusic() {
   if (!ctx) return;
-  musicBus.gain.setTargetAtTime(0.22, ctx.currentTime, 0.8);
+  musicBus.gain.setTargetAtTime(MUSIC_LEVEL, ctx.currentTime, 0.8);
 }
 export function onAudioReady(f) { listeners.push(f); if (ctx) f(); }

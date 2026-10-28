@@ -14,12 +14,27 @@ A 3D bluffing game in the style of Liar's Bar (Liar's Deck mode), built from scr
 ```bash
 npm install
 npm run build        # writes dist/index.html (artifact body) and dist/standalone.html
+npm start            # game + multiplayer server on http://localhost:3000
 npm test             # 2,000 simulated bot games to check the rules engine
+node test/server.mjs # multiplayer relay test
 ```
 
-Open `dist/standalone.html` in a browser to play solo. Any static host works (GitHub Pages, Netlify, Cloudflare Pages): upload `dist/standalone.html` as `index.html`.
+Multiplayer picks its connection automatically: the claude.ai room when opened as an artifact, the server's `/ws` WebSocket relay when served by `npm start`, and browser-to-browser (PeerJS) on a plain static host.
 
-Multiplayer only works when the page is opened as a claude.ai artifact, because it relies on that platform's realtime room. Solo play works everywhere.
+## Deploy on DigitalOcean
+
+**Droplet (about $4–6/month, gives you `https://<ip>.sslip.io`):**
+
+1. Create a droplet: Ubuntu 24.04, the cheapest Basic plan is enough.
+2. Open its console (Access → Launch Droplet Console) and run:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/AbdallahFawzyy/far-lu-bo-liars/main/deploy/setup.sh | sudo bash
+   ```
+3. It prints the link, e.g. `https://167.71.3.118.sslip.io`. Send it to your friends.
+
+Run the same command again to update after pushing new code.
+
+**App Platform (no server to manage, about $5/month):** Create App → GitHub → this repo. It reads `.do/app.yaml` (build `npm ci --omit=dev`, run `npm start`, health check `/health`) and gives you an `ondigitalocean.app` link. It redeploys on every push to `main`.
 
 ## Layout
 
@@ -30,6 +45,8 @@ Multiplayer only works when the page is opened as a claude.ai artifact, because 
 | `src/world.js` | Bar environment, lighting, particles, revolver and card models. |
 | `src/textures.js` | Every texture, drawn on canvas at load time. |
 | `src/audio.js` | Synthesized sound effects, voices, ambience and music. |
-| `src/net.js` | Multiplayer over the artifact room (presence-based). |
+| `src/net.js` | Multiplayer transports: claude.ai room, own-server WebSocket, PeerJS. |
+| `server/server.js` | Node server: serves the game and relays multiplayer presence over `/ws`. |
+| `deploy/setup.sh` | One-command DigitalOcean droplet setup (Node, Caddy HTTPS, systemd). |
 | `src/main.js` | Renderer, camera, presenter (turns events into animation), host director, UI. |
 | `test/` | Simulation test, Playwright screenshot/autoplay test, two-player test with a mock room. |

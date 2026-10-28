@@ -8,14 +8,23 @@
   },
   "scripts": {
     "test": "node test/sim.mjs",
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "start": "node server/server.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "esbuild": "0.24.0",
-    "three": "0.160.0"
+    "peerjs": "1.5.4",
+    "three": "0.160.0",
+    "ws": "8.18.0"
   },
-  "type": "module"
+  "type": "module",
+  "devDependencies": {
+    "peer": "1.0.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
 }

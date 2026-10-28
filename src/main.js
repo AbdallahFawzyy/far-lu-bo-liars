@@ -10,7 +10,7 @@ import * as A from './audio.js';
 import * as C from './characters.js';
 import * as W from './world.js';
 import * as T from './textures.js';
-import { getRoom, Table, randomCode, cleanName } from './net.js';
+import { getRoom, openTable, randomCode, cleanName } from './net.js';
 
 const $ = (id) => document.getElementById(id);
 const SPEEDS = { slow: 1.45, normal: 1, fast: 0.6 };
@@ -1046,12 +1046,15 @@ function sendAction(a) {
 const lobby = { code: '', players: [], seats: 3 };
 
 async function hostTable() {
-  const room = await getRoom();
-  if (!room) return toast('Multiplayer needs the page open on claude.ai.');
-  const code = randomCode();
   app.isHost = true;
-  const t = new Table(room, code, 'host');
-  try { await t.join(); } catch (e) { return toast('Could not open a table. Try again in a moment.'); }
+  toast('Opening a table…', 8000);
+  let t = null, code = '';
+  for (let attempt = 0; attempt < 3 && !t; attempt++) {
+    code = randomCode();
+    try { t = await openTable(code, 'host'); } catch (e) { if (e.code !== 'unavailable-id') break; }
+  }
+  if (!t) return toast('Could not open a table. Check your connection and try again.');
+  $('toast').hidden = true;
   app.table = t;
   lobby.code = code;
   app.myPeer = t.me || 'host';
@@ -1132,11 +1135,13 @@ function renderRoster(roster, seats) {
 async function joinTable(code) {
   code = (code || '').trim().toLowerCase();
   if (!/^[a-z0-9]{4}$/.test(code)) return toast('Table codes are 4 letters or numbers.');
-  const room = await getRoom();
-  if (!room) return toast('Multiplayer needs the page open on claude.ai.');
   app.isHost = false;
-  const t = new Table(room, code, 'guest');
-  try { await t.join(); } catch (e) { return toast('Could not reach that table.'); }
+  toast('Finding the table…', 15000);
+  let t;
+  try { t = await openTable(code, 'guest'); } catch (e) {
+    return toast(e.code === 'peer-unavailable' ? 'No table with that code. Check it with the host.' : 'Could not reach that table. Check your connection and try again.', 4000);
+  }
+  $('toast').hidden = true;
   app.table = t;
   lobby.code = code;
   app.myPeer = t.me;
@@ -1423,12 +1428,9 @@ function boot() {
   buildCharPicker();
   menuScene();
   showScreen('menu');
-  getRoom().then((room) => {
-    const ok = !!room;
-    $('btnHost').disabled = !ok;
-    $('btnJoin').disabled = !ok;
-    $('mpNote').textContent = ok ? 'Host a table and send friends the 4-letter code.' : 'Multiplayer works when this page is opened on claude.ai. Solo play works anywhere.';
-  });
+  $('btnHost').disabled = false;
+  $('btnJoin').disabled = false;
+  $('mpNote').textContent = 'Host a table and send friends the 4-letter code. Friends open this same page and join.';
   if (window.__LD_TEST) { app.quality = window.__LD_TEST === 'hq' ? 'high' : 'low'; renderer.setPixelRatio(1); }
   if (/Mobi|Android/i.test(navigator.userAgent)) { app.quality = 'low'; renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); world.lights.spot.shadow.mapSize.set(1024, 1024); }
   requestAnimationFrame(frame);

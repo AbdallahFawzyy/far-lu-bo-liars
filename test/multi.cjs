@@ -4,7 +4,7 @@ const fs = require('fs');
 (async () => {
   const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--proxy-bypass-list=<-loopback>;127.0.0.1;localhost'] });
   const ctx = await b.newContext({ viewport: { width: 480, height: 300 } });
-  await ctx.addInitScript({ content: "window.__LD_TEST='low';" + fs.readFileSync('test/mockroom.js', 'utf8') });
+  await ctx.addInitScript({ content: "window.__LD_TEST='low';window.__LD_PEER={host:'127.0.0.1',port:9000,path:'/',secure:false};" + (process.env.MOCK ? fs.readFileSync('test/mockroom.js', 'utf8') : '') });
   const url = 'http://127.0.0.1:8123/standalone.html';
   const errs = [];
   const mk = async (tag) => { const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(tag + ' PAGEERR ' + e.message)); p.on('console', (m) => { if (m.type() === 'error') errs.push(tag + ' ' + m.text()); }); await p.goto(url, { waitUntil: 'commit', timeout: 60000 }); await p.waitForFunction(() => window.__ld && document.getElementById('loading')?.hidden, null, { timeout: 240000 }); await p.waitForTimeout(1500); return p; };
@@ -13,21 +13,23 @@ const fs = require('fs');
   await h.fill('#nameInput', 'Abdallah');
   await h.click('label:has(input[value="fast"])');
   await h.click('#btnHost');
-  await h.waitForTimeout(1500);
+  await h.waitForFunction(() => document.getElementById('lobbyCode').textContent !== '----' || /Could not/.test(document.getElementById('toast').textContent), null, { timeout: 90000 }).catch(() => {});
+  console.log('host toast:', await h.textContent('#toast'));
   const code = (await h.textContent('#lobbyCode')).trim();
   console.log('code', code);
   await gst.fill('#nameInput', 'Friend');
   await gst.click('.charCard[data-id="wait"]');
   await gst.fill('#codeInput', code);
   await gst.click('#btnJoin');
-  await h.waitForTimeout(2500);
+  await h.waitForFunction(() => document.querySelectorAll('#roster li:not(.empty)').length >= 2, null, { timeout: 90000 }).catch(() => {});
+  console.log('guest toast:', await gst.textContent('#toast'));
   console.log('host roster:', (await h.$$eval('#roster li strong', (els) => els.map((e) => e.textContent))).join(' | '));
   console.log('guest roster:', (await gst.$$eval('#roster li strong', (els) => els.map((e) => e.textContent))).join(' | '));
   await h.click('#btnStart');
   await h.evaluate(() => window.__ld.setAutoplay(true));
   const t0 = Date.now();
   let guestActs = 0;
-  while (Date.now() - t0 < 900000) {
+  while (Date.now() - t0 < (process.env.SHORT ? 150000 : 900000)) {
     await gst.waitForTimeout(3000);
     // the guest plays by clicking the real buttons
     const vis = await gst.evaluate(() => !document.getElementById('controls').hidden);

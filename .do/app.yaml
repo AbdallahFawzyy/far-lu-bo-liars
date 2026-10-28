@@ -1,0 +1,20 @@
+# DigitalOcean App Platform spec (the no-SSH option).
+# Create the app from this repo and App Platform picks these settings up.
+name: liars-den
+services:
+  - name: web
+    github:
+      repo: AbdallahFawzyy/far-lu-bo-liars
+      branch: main
+      deploy_on_push: true
+    environment_slug: node-js
+    build_command: npm ci --omit=dev
+    run_command: npm start
+    http_port: 8080
+    envs:
+      - key: PORT
+        value: "8080"
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    health_check:
+      http_path: /health

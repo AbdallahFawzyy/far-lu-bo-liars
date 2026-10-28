@@ -61,9 +61,31 @@ RestartSec=2
 [Install]
 WantedBy=multi-user.target
 EOF
+echo "==> Turning on auto-deploy (checks GitHub every minute)"
+cat > /etc/systemd/system/liars-den-update.service <<EOF
+[Unit]
+Description=Pull Liar's Den from GitHub and redeploy if changed
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash $DIR/deploy/update.sh
+EOF
+cat > /etc/systemd/system/liars-den-update.timer <<EOF
+[Unit]
+Description=Check GitHub for Liar's Den updates every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload
 systemctl enable --now liars-den
 systemctl restart liars-den
+systemctl enable --now liars-den-update.timer
 
 IP="$(curl -fsS https://api.ipify.org || hostname -I | awk '{print $1}')"
 HOST="${IP}.sslip.io"

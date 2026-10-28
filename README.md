@@ -32,7 +32,7 @@ Multiplayer picks its connection automatically: the claude.ai room when opened a
    ```
 3. It prints the link, e.g. `https://167.71.3.118.sslip.io`. Send it to your friends.
 
-Run the same command again to update after pushing new code.
+The droplet checks GitHub every minute and redeploys by itself when `main` changes. Watch deploys with `journalctl -u liars-den-update -f`.
 
 **App Platform (no server to manage, about $5/month):** Create App → GitHub → this repo. It reads `.do/app.yaml` (build `npm ci --omit=dev`, run `npm start`, health check `/health`) and gives you an `ondigitalocean.app` link. It redeploys on every push to `main`.
 
